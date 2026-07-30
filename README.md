@@ -172,6 +172,28 @@ AFFINITY_DPI=96  ./run-affinity.sh     # unscaled
 The value is remembered in the prefix, so it only has to be set once. Changing
 it later takes effect on the next start.
 
+#### Monitors with different scaling
+
+Dragging the window to a monitor with a different scale **does not** rescale the
+interface. `LogPixels` is a single value per Wine prefix, read once at startup,
+and Wine's X11 driver has no per-monitor DPI to update it from — so the
+compositor bitmap-scales the window instead and it looks soft or mis-sized on
+the second screen.
+
+This is not a container limitation: a native Wine installation behaves
+identically. X11 compounds it, since mixed scaling there is emulated by scaling
+the whole screen — which is why `Xft.dpi` is one global number to begin with.
+
+The practical approach is to set the DPI of the monitor you use Affinity on
+most, and to restart it with an explicit value when you work on the other one:
+
+```bash
+AFFINITY_DPI=96 ./run-affinity.sh
+```
+
+Close Affinity first — the Wine prefix holds a lock, so a second instance
+against the same volume is not a way around this.
+
 ### What lives where
 
 Everything persistent is in the `affinity-data` volume:
