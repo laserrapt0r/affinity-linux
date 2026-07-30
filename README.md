@@ -462,7 +462,8 @@ created a needless friction point with that GPL-2.0-only component.
 
 Affinity itself is proprietary software belonging to Canva. It is downloaded from
 the vendor at first run under the vendor's terms, and is neither included here
-nor redistributed. See [LICENSE](LICENSE) for the full breakdown.
+nor redistributed. See [THIRD-PARTY.md](THIRD-PARTY.md) for the full breakdown,
+including where each component comes from.
 
 The Wine setup follows the groundwork of the
 [AffinityOnLinux](https://github.com/seapear/AffinityOnLinux) community.
