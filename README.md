@@ -234,19 +234,37 @@ directory:
 * **Right-click actions** on the launcher for *Wine configuration* and
   *Reinstall / update Affinity*.
 
-Works on GNOME, KDE Plasma, XFCE and anything else following the
-freedesktop.org specs. Run it once after the first Affinity launch, so the icons
-can be pulled from the data volume. Some desktops need a re-login to notice new
-icons.
+Everything here is plain freedesktop.org, so it works the same on GNOME, KDE
+Plasma, XFCE and Cinnamon: `~/.local/share/applications` for the entry, the
+`hicolor` theme for icons (Breeze and Adwaita both fall back to it), and
+`xdg-mime` writing `mimeapps.list`, which Plasma and GNOME read alike.
+`StartupWMClass` is honoured by both GNOME Shell and Plasma's task manager.
+
+Run it once after the first Affinity launch, so the icons can be pulled from the
+data volume. Some desktops need a re-login to notice new icons.
+
+Tested on GNOME/X11. The mechanisms are desktop-agnostic, but Plasma and XFCE
+have not been verified here.
 
 ### HiDPI displays
 
 Wine hands applications a fixed 96 DPI regardless of what the desktop uses, so
 on a scaled screen Affinity comes up at half or a third of the size of
-everything around it. The launcher reads the desktop's scaling — `Xft.dpi`
-first, then GNOME's `scaling-factor` and `text-scaling-factor` — and passes it
-in; the entrypoint writes it to `LogPixels` in the prefix, the same setting
-winecfg's screen-resolution slider changes.
+everything around it. The launcher works the scaling out and passes it in; the
+entrypoint writes it to `LogPixels` in the prefix, the same setting winecfg's
+screen-resolution slider changes.
+
+Detection order:
+
+1. `Xft.dpi` from the X resource database — set by GNOME, KDE and most desktops
+   on X11, and the only one needed in practice there
+2. GNOME's `scaling-factor`, then `text-scaling-factor`
+3. KDE Plasma's `forceFontDPI`, then `ScaleFactor`, from `kdeglobals` — Plasma
+   does not always set `Xft.dpi` under Wayland
+4. Failing all of that, 96
+
+Anything outside 96–384 DPI is treated as a detection bug and discarded, since a
+bad reading produces a window thousands of pixels wide.
 
 Affinity is a WPF application and honours the system DPI, so the interface is
 re-rendered at the higher resolution rather than scaled up: it stays sharp.
@@ -419,16 +437,32 @@ this; only relevant if you invoke `podman run` by hand.
 
 ## Credits and licences
 
-This repository contains only build instructions. Affinity is proprietary
-software from Canva, downloaded from the vendor at runtime under their terms; the
-built image does not redistribute it.
+This repository is **[MIT licensed](LICENSE)** and contains nothing but build
+instructions: a Dockerfile, shell scripts and this document. No third-party code
+is bundled — every component is fetched from its own upstream at build or run
+time and keeps its own licence:
 
-Third-party components fetched at build time:
+| Component | Licence |
+|---|---|
+| [Wine](https://www.winehq.org/) | LGPL-2.1-or-later |
+| [DXVK](https://github.com/doitsujin/dxvk) | Zlib |
+| [vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton) | LGPL-2.1-or-later |
+| [AffinityPluginLoader](https://github.com/noahc3/AffinityPluginLoader) | MIT |
+| WineFix (APL plugin) | GPL-2.0 |
+| `d2d1.dll` bundled with WineFix | LGPL-2.1 |
+| Microsoft .NET Framework 4.8, VC++ runtime | proprietary, Microsoft redistributables |
 
-* [Wine](https://www.winehq.org/) (LGPL-2.1)
-* [DXVK](https://github.com/doitsujin/dxvk) (zlib), [vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton) (LGPL-2.1)
-* [AffinityPluginLoader](https://github.com/noahc3/AffinityPluginLoader) (MIT), its WineFix plugin (GPL-2.0) and the bundled patched `d2d1.dll` (LGPL-2.1)
-* Microsoft .NET Framework 4.8 and the VC++ runtime, installed by winetricks from Microsoft's servers
+MIT is the appropriate choice here precisely *because* nothing is vendored. The
+GPL-2.0 licence on WineFix would matter if this repository shipped or linked
+against it; it does not. A built image ends up holding software under several
+licences side by side, which is mere aggregation rather than a combined work —
+these scripts install and invoke those components, they neither link against nor
+derive from them. Picking a copyleft licence for the scripts would only have
+created a needless friction point with that GPL-2.0-only component.
+
+Affinity itself is proprietary software belonging to Canva. It is downloaded from
+the vendor at first run under the vendor's terms, and is neither included here
+nor redistributed. See [LICENSE](LICENSE) for the full breakdown.
 
 The Wine setup follows the groundwork of the
 [AffinityOnLinux](https://github.com/seapear/AffinityOnLinux) community.

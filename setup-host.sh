@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # One-off host preparation for NVIDIA GPU passthrough.
 #
 # Run this once, and again after every NVIDIA driver update -- the CDI spec

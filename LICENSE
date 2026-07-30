@@ -1,0 +1,48 @@
+MIT License
+
+Copyright (c) 2026 Tommy Wurzbacher
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+The MIT licence above covers the contents of this repository: the Dockerfile,
+the shell scripts and the documentation.
+
+It does not, and cannot, relicense anything those files download. This
+repository bundles no third-party code — every component is fetched from its
+own upstream at build or run time and keeps its own licence:
+
+  Wine                                    LGPL-2.1-or-later
+  DXVK                                    Zlib
+  vkd3d-proton                            LGPL-2.1-or-later
+  AffinityPluginLoader                    MIT
+  WineFix (APL plugin)                    GPL-2.0
+  d2d1.dll bundled with WineFix           LGPL-2.1
+  Microsoft .NET Framework 4.8            proprietary, Microsoft redistributable
+  Microsoft Visual C++ runtime            proprietary, Microsoft redistributable
+
+A built image therefore contains software under several licences placed side by
+side. That is mere aggregation, not a combined work: these scripts install and
+invoke those components, they do not link against or derive from them.
+
+Affinity itself is proprietary software belonging to Canva. It is downloaded
+from the vendor at first run, under the vendor's own terms, and is neither
+included in this repository nor redistributed by it. You need whatever licence
+or account Canva requires in order to use it.

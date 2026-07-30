@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Entrypoint for the Affinity/Wine container.
 #
 # On first start this materialises the prebuilt Wine prefix into the data

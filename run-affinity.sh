@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Convenience launcher for the Affinity container.
 #
 # Handles the fiddly parts: X11 authorisation, GPU passthrough (NVIDIA via CDI,
@@ -94,6 +95,21 @@ detect_dpi() {
     if [ -n "$v" ]; then
         v=$(awk -v s="$v" 'BEGIN { printf "%d", 96 * s }' 2>/dev/null)
         [ -n "$v" ] && [ "$v" -gt 96 ] 2>/dev/null && { echo "$v"; return; }
+    fi
+
+    # KDE Plasma. On X11 Plasma sets Xft.dpi and we never get here, but on
+    # Wayland it often does not, so read what Plasma itself recorded.
+    local kg="${XDG_CONFIG_HOME:-$HOME/.config}/kdeglobals"
+    if [ -r "$kg" ]; then
+        v=$(awk -F= '/^[[:space:]]*forceFontDPI[[:space:]]*=/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' "$kg")
+        if [ -n "$v" ] && [ "$v" -ge 96 ] 2>/dev/null; then echo "$v"; return; fi
+
+        # ScaleFactor is a multiplier, e.g. 2 or 1.5.
+        v=$(awk -F= '/^[[:space:]]*ScaleFactor[[:space:]]*=/ {gsub(/[[:space:]]/, "", $2); print $2; exit}' "$kg")
+        if [ -n "$v" ]; then
+            v=$(awk -v s="$v" 'BEGIN { printf "%d", 96 * s }' 2>/dev/null)
+            [ -n "$v" ] && [ "$v" -gt 96 ] 2>/dev/null && { echo "$v"; return; }
+        fi
     fi
 
     echo 96

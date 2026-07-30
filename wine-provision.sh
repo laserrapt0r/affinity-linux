@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Build-time helper: run one Wine provisioning command headlessly, then shut the
 # prefix down cleanly.
 #

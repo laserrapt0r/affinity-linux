@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # Desktop integration: menu entry, icons and file associations.
 #
 # Installs into ~/.local/share, so no root is needed and nothing outside your

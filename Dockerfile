@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1.7
+# SPDX-License-Identifier: MIT
 #
 # Affinity (Canva/Serif) v3 in a container, running under Wine.
 #
