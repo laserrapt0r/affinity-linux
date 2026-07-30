@@ -203,7 +203,8 @@ Re-run it after every driver update — the spec pins driver library paths.
 | `AFFINITY_LOG` | `~/.local/state/affinity/last-run.log` | Where the last run's output is kept. Empty disables it |
 | `AFFINITY_ENGINE` | auto | `podman` or `docker` |
 | `AFFINITY_VOLUME` | `affinity-data` | Name of the data volume |
-| `AFFINITY_MOUNTS` | — | Extra bind mounts, e.g. `"$HOME/Bilder:/data/Bilder"` |
+| `AFFINITY_SHARE` | `xdg` | Which host files Affinity can see: `xdg` (Pictures, Documents, Downloads, Desktop), `home` (all of `$HOME`), `none` |
+| `AFFINITY_MOUNTS` | — | Additional bind mounts, e.g. `"/mnt/fotos:/mnt/fotos"` |
 | `WINEDEBUG` | `-all` | Set to `+err,+warn` when debugging |
 
 Example — expose your pictures folder and force the discrete GPU:
@@ -211,6 +212,41 @@ Example — expose your pictures folder and force the discrete GPU:
 ```bash
 AFFINITY_GPU=nvidia AFFINITY_MOUNTS="$HOME/Bilder:/data/Bilder" ./run-affinity.sh
 ```
+
+### Access to your files
+
+A container sees none of your files unless told to, and an image editor that
+cannot open or save anything is not much use. By default the **XDG user
+directories** are shared — Pictures, Documents, Downloads and Desktop — mounted at
+their real paths. The rest of your home directory, `~/.ssh` and browser profiles
+included, stays outside.
+
+Affinity's file dialogs open the *Windows* profile folders, which live inside the
+prefix, so those are replaced with symlinks to the shared host directories. Save
+As then lands where you would expect:
+
+```
+Pictures  -> /home/tommy/Bilder
+Documents -> /home/tommy/Dokumente
+```
+
+Localised directory names are handled: the paths come from `xdg-user-dir`, or
+`user-dirs.dirs` if that is not installed. With `--userns=keep-id` anything
+Affinity writes belongs to you on the host, not to a namespaced UID.
+
+Widen or narrow it as you like:
+
+```bash
+AFFINITY_SHARE=home ./run-affinity.sh                      # all of $HOME
+AFFINITY_SHARE=none ./run-affinity.sh                      # nothing
+AFFINITY_MOUNTS="/mnt/fotos:/mnt/fotos" ./run-affinity.sh  # plus a specific path
+```
+
+If a Windows profile folder already contains files, it is left as a real
+directory rather than being replaced — your data is never moved. Wine's own empty
+placeholder folders (`Pictures/Screenshots`, for instance) are pruned so the link
+can still be made. In that case the host directory remains reachable under its
+`Z:` path.
 
 ### Desktop integration
 

@@ -272,6 +272,72 @@ if [ -f "$SCRIPT_DIR/cache/Affinity-x64.msix" ]; then
     msg "Reusing local MSIX from cache/"
 fi
 
+# --------------------------------------------------------------------------
+# Host files
+#
+# A container sees none of your files unless you say so, and an image editor
+# that cannot open or save anything is not much use. The default is a middle
+# ground: the XDG user directories where pictures and documents actually live,
+# mounted at their real paths, and nothing else -- so ~/.ssh, browser profiles
+# and the rest of your home directory stay outside.
+#
+# AFFINITY_SHARE=xdg   Pictures, Documents, Downloads, Desktop (default)
+#                home  all of $HOME -- convenient, much weaker isolation
+#                none  nothing; use AFFINITY_MOUNTS for specific paths
+# --------------------------------------------------------------------------
+MOUNTED_DIRS=""
+
+add_dir_mount() {
+    local dir="$1" mode="${2:-rw}"
+    [ -n "$dir" ] && [ -d "$dir" ] || return 0
+    case ":$MOUNTED_DIRS:" in *":$dir:"*) return 0 ;; esac
+    if [ "$mode" = ro ]; then ARGS+=(-v "$dir:$dir:ro"); else ARGS+=(-v "$dir:$dir"); fi
+    MOUNTED_DIRS="$MOUNTED_DIRS:$dir"
+}
+
+# Resolve an XDG directory without depending on xdg-user-dir being installed.
+xdg_dir() {
+    local key="$1" fallback="$2" v=""
+    if command -v xdg-user-dir >/dev/null 2>&1; then
+        v=$(xdg-user-dir "$key" 2>/dev/null)
+    fi
+    if [ -z "$v" ] || [ "$v" = "$HOME" ]; then
+        v=$(awk -F= -v k="XDG_${key}_DIR" '$1==k {gsub(/"/,"",$2); print $2; exit}' \
+              "${XDG_CONFIG_HOME:-$HOME/.config}/user-dirs.dirs" 2>/dev/null)
+        v=$(eval echo "$v" 2>/dev/null)
+    fi
+    [ -z "$v" ] || [ "$v" = "$HOME" ] && v="$HOME/$fallback"
+    echo "$v"
+}
+
+case "${AFFINITY_SHARE:-xdg}" in
+    none) ;;
+    home)
+        add_dir_mount "$HOME"
+        ARGS+=(-e "AFFINITY_XDG_PICTURES=$(xdg_dir PICTURES Pictures)"
+               -e "AFFINITY_XDG_DOCUMENTS=$(xdg_dir DOCUMENTS Documents)"
+               -e "AFFINITY_XDG_DOWNLOAD=$(xdg_dir DOWNLOAD Downloads)"
+               -e "AFFINITY_XDG_DESKTOP=$(xdg_dir DESKTOP Desktop)")
+        msg "Sharing all of $HOME"
+        ;;
+    xdg)
+        shared=""
+        for key_fallback in "PICTURES:Pictures" "DOCUMENTS:Documents" \
+                            "DOWNLOAD:Downloads" "DESKTOP:Desktop"; do
+            key=${key_fallback%%:*}; fb=${key_fallback##*:}
+            d=$(xdg_dir "$key" "$fb")
+            if [ -d "$d" ]; then
+                add_dir_mount "$d"
+                ARGS+=(-e "AFFINITY_XDG_${key}=$d")
+                shared="${shared:+$shared, }$(basename "$d")"
+            fi
+        done
+        [ -n "$shared" ] && msg "Sharing: $shared" \
+                         || warn "No XDG user directories found -- Affinity will see no host files."
+        ;;
+    *)  die "AFFINITY_SHARE must be xdg, home or none." ;;
+esac
+
 for m in $EXTRA_MOUNTS; do
     ARGS+=(-v "$m")
 done
@@ -296,7 +362,6 @@ fi
 # --------------------------------------------------------------------------
 CMD=()
 FILES=()
-seen_dirs=""
 
 for arg in "$@"; do
     case "$arg" in
@@ -305,11 +370,7 @@ for arg in "$@"; do
     esac
     if [ -e "$arg" ]; then
         abs=$(readlink -f "$arg")
-        dir=$(dirname "$abs")
-        case ":$seen_dirs:" in
-            *":$dir:"*) ;;
-            *) ARGS+=(-v "$dir:$dir"); seen_dirs="$seen_dirs:$dir" ;;
-        esac
+        add_dir_mount "$(dirname "$abs")"
         FILES+=("Z:${abs//\//\\}")
     else
         CMD+=("$arg")

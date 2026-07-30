@@ -119,6 +119,49 @@ init_prefix() {
     mkdir -p "$DATA/cache"
 }
 
+# Point the Windows user profile at the shared host directories.
+#
+# The launcher bind-mounts the XDG directories at their real paths, but Affinity's
+# file dialogs open "Pictures" and "Documents" from the Windows profile, which
+# lives inside the prefix. Replacing those with symlinks is what Wine itself does
+# on a normal desktop install, and makes Save As land in the right place.
+#
+# An existing directory with content in it is left alone -- that is Affinity's
+# data, not ours to move.
+setup_user_dirs() {
+    local profile="$PREFIX/drive_c/users/affinity"
+    [ -d "$profile" ] || return 0
+
+    local pair name target
+    for pair in "Pictures:${AFFINITY_XDG_PICTURES:-}" \
+                "Documents:${AFFINITY_XDG_DOCUMENTS:-}" \
+                "Downloads:${AFFINITY_XDG_DOWNLOAD:-}" \
+                "Desktop:${AFFINITY_XDG_DESKTOP:-}"; do
+        name=${pair%%:*}
+        target=${pair#*:}
+        [ -n "$target" ] && [ -d "$target" ] || continue
+
+        local link="$profile/$name"
+        if [ -L "$link" ]; then
+            [ "$(readlink "$link")" = "$target" ] && continue
+            rm -f "$link"
+        elif [ -d "$link" ]; then
+            # Wine seeds these with empty subdirectories of its own (Pictures
+            # gets a Screenshots folder, for instance). Prune empty directories
+            # so the link can be made, but never touch a file: if anything real
+            # is in there it is the user's, and the folder is left alone.
+            find "$link" -mindepth 1 -depth -type d -empty -delete 2>/dev/null || true
+            rmdir "$link" 2>/dev/null || {
+                warn "$name in the Windows profile holds files; leaving it as is."
+                warn "Your host $name is still reachable under Z:$target"
+                continue
+            }
+        fi
+        ln -sfn "$target" "$link" 2>/dev/null || true
+    done
+    log "Windows profile folders linked to the shared host directories."
+}
+
 # Install a set of DLLs into the prefix and mark them as native overrides.
 # Copy a translation layer into the prefix and mark exactly those DLLs it
 # actually ships as native overrides -- an override pointing at a DLL that is
@@ -298,6 +341,7 @@ launch_affinity() {
     setup_vulkan_device
     report_gpu
     init_prefix
+    setup_user_dirs
     setup_renderer
     setup_wpf
     setup_dpi
@@ -318,7 +362,7 @@ launch_affinity() {
 
 case "${1:-affinity}" in
     affinity)   shift || true; launch_affinity "$@" ;;
-    shell|bash) init_prefix; exec /bin/bash ;;
+    shell|bash) shift; init_prefix; exec /bin/bash "$@" ;;
     winecfg)    init_prefix; check_display; exec winecfg ;;
     winetricks) shift; init_prefix; check_display; exec winetricks "$@" ;;
     wine)       shift; init_prefix; exec wine "$@" ;;
