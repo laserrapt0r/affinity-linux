@@ -119,6 +119,34 @@ init_prefix() {
     mkdir -p "$DATA/cache"
 }
 
+# Give the shared host paths their own drive letters.
+#
+# Everything is reachable under Z: (Wine maps that to /), but Z:\home\you\... is
+# an awkward thing to navigate to in a file dialog. A drive letter shows up in
+# the sidebar and is one click away.
+#
+#   H:  your home directory on the host
+#   Y:  the whole host filesystem, with AFFINITY_SHARE=all
+setup_drives() {
+    local dd="$PREFIX/dosdevices"
+    [ -d "$dd" ] || return 0
+
+    # '|' as the separator, because a drive spec already contains the colon that
+    # Wine requires in the dosdevices name ("h:", not "h").
+    local pair letter target
+    for pair in "h|${AFFINITY_HOST_HOME:-}" "y|${AFFINITY_HOSTFS:-}"; do
+        letter=${pair%%|*}
+        target=${pair#*|}
+        if [ -z "$target" ] || [ ! -d "$target" ]; then
+            # Drop a stale letter if the share was narrowed since last run.
+            [ -L "$dd/$letter:" ] && rm -f "$dd/$letter:"
+            continue
+        fi
+        ln -sfn "$target" "$dd/$letter:" 2>/dev/null || true
+        log "Drive $letter: -> $target"
+    done
+}
+
 # Point the Windows user profile at the shared host directories.
 #
 # The launcher bind-mounts the XDG directories at their real paths, but Affinity's
@@ -341,6 +369,7 @@ launch_affinity() {
     setup_vulkan_device
     report_gpu
     init_prefix
+    setup_drives
     setup_user_dirs
     setup_renderer
     setup_wpf

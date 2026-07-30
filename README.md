@@ -203,7 +203,7 @@ Re-run it after every driver update — the spec pins driver library paths.
 | `AFFINITY_LOG` | `~/.local/state/affinity/last-run.log` | Where the last run's output is kept. Empty disables it |
 | `AFFINITY_ENGINE` | auto | `podman` or `docker` |
 | `AFFINITY_VOLUME` | `affinity-data` | Name of the data volume |
-| `AFFINITY_SHARE` | `xdg` | Which host files Affinity can see: `xdg` (Pictures, Documents, Downloads, Desktop), `home` (all of `$HOME`), `none` |
+| `AFFINITY_SHARE` | `home` | Which host files Affinity can see: `home` (`$HOME` + media/mount points), `xdg` (only Pictures/Documents/Downloads/Desktop), `all` (whole filesystem as drive `Y:`), `none` |
 | `AFFINITY_MOUNTS` | — | Additional bind mounts, e.g. `"/mnt/fotos:/mnt/fotos"` |
 | `WINEDEBUG` | `-all` | Set to `+err,+warn` when debugging |
 
@@ -215,38 +215,57 @@ AFFINITY_GPU=nvidia AFFINITY_MOUNTS="$HOME/Bilder:/data/Bilder" ./run-affinity.s
 
 ### Access to your files
 
-A container sees none of your files unless told to, and an image editor that
-cannot open or save anything is not much use. By default the **XDG user
-directories** are shared — Pictures, Documents, Downloads and Desktop — mounted at
-their real paths. The rest of your home directory, `~/.ssh` and browser profiles
-included, stays outside.
-
-Affinity's file dialogs open the *Windows* profile folders, which live inside the
-prefix, so those are replaced with symlinks to the shared host directories. Save
-As then lands where you would expect:
+A container sees none of your files unless told to. Pictures legitimately live
+anywhere — a Nextcloud folder, an SD card, a mounted Windows partition — so the
+default shares your whole home directory plus the usual media and mount points:
 
 ```
-Pictures  -> /home/tommy/Bilder
-Documents -> /home/tommy/Dokumente
+[run] Sharing /home/you
+[run] Sharing media/mount points: /media, /mnt, /srv
 ```
 
-Localised directory names are handled: the paths come from `xdg-user-dir`, or
+That is roughly what a normally installed desktop application can reach anyway.
+`/media`, `/run/media/$USER`, `/mnt` and `/srv` are bound with **`rslave`** mount
+propagation, so a card you insert or a share you mount *after* Affinity started
+still appears inside — a plain bind mount would freeze whatever was there at
+launch.
+
+| `AFFINITY_SHARE` | Affinity can reach |
+|---|---|
+| `home` (default) | `$HOME` and `/media`, `/run/media/$USER`, `/mnt`, `/srv` |
+| `xdg` | only Pictures, Documents, Downloads, Desktop |
+| `all` | the entire host filesystem, as drive `Y:` |
+| `none` | nothing — combine with `AFFINITY_MOUNTS` for specific paths |
+
+```bash
+AFFINITY_SHARE=all ./run-affinity.sh                       # everything, drive Y:
+AFFINITY_SHARE=xdg ./run-affinity.sh                       # just the user dirs
+AFFINITY_MOUNTS="/srv/fotos:/srv/fotos" ./run-affinity.sh  # plus a specific path
+```
+
+#### Where things show up in Affinity
+
+Everything shared is reachable under `Z:`, which Wine maps to `/`, but
+`Z:\home\you\...` is awkward to navigate to in a file dialog. So:
+
+* **`H:`** is your home directory
+* **`Y:`** is the whole host filesystem, with `AFFINITY_SHARE=all`
+* **Pictures, Documents, Downloads, Desktop** in the Windows profile are
+  symlinked to the matching host directories, so Save As lands where you expect
+
+Localised directory names are handled — the paths come from `xdg-user-dir`, or
 `user-dirs.dirs` if that is not installed. With `--userns=keep-id` anything
 Affinity writes belongs to you on the host, not to a namespaced UID.
 
-Widen or narrow it as you like:
+If a Windows profile folder already contains files it is left as a real
+directory rather than replaced, so your data is never moved; Wine's own empty
+placeholders (`Pictures/Screenshots`, for instance) are pruned so the link can
+still be made.
 
-```bash
-AFFINITY_SHARE=home ./run-affinity.sh                      # all of $HOME
-AFFINITY_SHARE=none ./run-affinity.sh                      # nothing
-AFFINITY_MOUNTS="/mnt/fotos:/mnt/fotos" ./run-affinity.sh  # plus a specific path
-```
-
-If a Windows profile folder already contains files, it is left as a real
-directory rather than being replaced — your data is never moved. Wine's own empty
-placeholder folders (`Pictures/Screenshots`, for instance) are pruned so the link
-can still be made. In that case the host directory remains reachable under its
-`Z:` path.
+A note on the trade-off: `home` and `all` widen what a compromise inside the
+container could reach. `all` in particular means read/write access to everything
+your user account can touch, which is no worse than running Affinity natively,
+but a good deal more than `xdg`. Pick the narrowest one you can live with.
 
 ### Desktop integration
 

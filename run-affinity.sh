@@ -281,8 +281,14 @@ fi
 # mounted at their real paths, and nothing else -- so ~/.ssh, browser profiles
 # and the rest of your home directory stay outside.
 #
-# AFFINITY_SHARE=xdg   Pictures, Documents, Downloads, Desktop (default)
-#                home  all of $HOME -- convenient, much weaker isolation
+# Pictures legitimately live anywhere: a Nextcloud folder, an SD card, a mounted
+# Windows partition. So the default shares $HOME together with the usual media
+# and mount points, which is what a normally installed desktop application can
+# reach anyway.
+#
+# AFFINITY_SHARE=home  $HOME + /media, /run/media/$USER, /mnt, /srv (default)
+#                xdg   only Pictures, Documents, Downloads, Desktop
+#                all   the entire host filesystem, as drive Y:
 #                none  nothing; use AFFINITY_MOUNTS for specific paths
 # --------------------------------------------------------------------------
 MOUNTED_DIRS=""
@@ -310,15 +316,31 @@ xdg_dir() {
     echo "$v"
 }
 
-case "${AFFINITY_SHARE:-xdg}" in
-    none) ;;
-    home)
-        add_dir_mount "$HOME"
-        ARGS+=(-e "AFFINITY_XDG_PICTURES=$(xdg_dir PICTURES Pictures)"
-               -e "AFFINITY_XDG_DOCUMENTS=$(xdg_dir DOCUMENTS Documents)"
-               -e "AFFINITY_XDG_DOWNLOAD=$(xdg_dir DOWNLOAD Downloads)"
-               -e "AFFINITY_XDG_DESKTOP=$(xdg_dir DESKTOP Desktop)")
-        msg "Sharing all of $HOME"
+# Removable media, mounted partitions and network shares. Bound with rslave so
+# that a card inserted or a share mounted *after* Affinity started still shows
+# up inside the container -- a plain bind would freeze the current contents.
+add_media_mounts() {
+    local base found=""
+    for base in /media "/run/media/$(id -un)" /mnt /srv; do
+        [ -d "$base" ] || continue
+        case ":$MOUNTED_DIRS:" in *":$base:"*) continue ;; esac
+        ARGS+=(-v "$base:$base:rslave")
+        MOUNTED_DIRS="$MOUNTED_DIRS:$base"
+        found="${found:+$found, }$base"
+    done
+    [ -n "$found" ] && msg "Sharing media/mount points: $found"
+}
+
+pass_xdg_env() {
+    ARGS+=(-e "AFFINITY_XDG_PICTURES=$(xdg_dir PICTURES Pictures)"
+           -e "AFFINITY_XDG_DOCUMENTS=$(xdg_dir DOCUMENTS Documents)"
+           -e "AFFINITY_XDG_DOWNLOAD=$(xdg_dir DOWNLOAD Downloads)"
+           -e "AFFINITY_XDG_DESKTOP=$(xdg_dir DESKTOP Desktop)")
+}
+
+case "${AFFINITY_SHARE:-home}" in
+    none)
+        warn "Sharing nothing -- Affinity will not see any of your files."
         ;;
     xdg)
         shared=""
@@ -326,16 +348,33 @@ case "${AFFINITY_SHARE:-xdg}" in
                             "DOWNLOAD:Downloads" "DESKTOP:Desktop"; do
             key=${key_fallback%%:*}; fb=${key_fallback##*:}
             d=$(xdg_dir "$key" "$fb")
-            if [ -d "$d" ]; then
-                add_dir_mount "$d"
-                ARGS+=(-e "AFFINITY_XDG_${key}=$d")
-                shared="${shared:+$shared, }$(basename "$d")"
-            fi
+            [ -d "$d" ] || continue
+            add_dir_mount "$d"
+            shared="${shared:+$shared, }$(basename "$d")"
         done
+        pass_xdg_env
         [ -n "$shared" ] && msg "Sharing: $shared" \
-                         || warn "No XDG user directories found -- Affinity will see no host files."
+                         || warn "No XDG user directories found."
         ;;
-    *)  die "AFFINITY_SHARE must be xdg, home or none." ;;
+    home)
+        add_dir_mount "$HOME"
+        add_media_mounts
+        pass_xdg_env
+        ARGS+=(-e "AFFINITY_HOST_HOME=$HOME")
+        msg "Sharing $HOME"
+        ;;
+    all)
+        # The whole host filesystem, reachable as drive Y: inside Wine. $HOME is
+        # additionally bound at its real path so Z:\home\... keeps working and
+        # the profile folder links stay valid.
+        ARGS+=(-v "/:/hostfs:rslave")
+        add_dir_mount "$HOME"
+        pass_xdg_env
+        ARGS+=(-e "AFFINITY_HOST_HOME=$HOME" -e "AFFINITY_HOSTFS=/hostfs")
+        msg "Sharing the entire host filesystem (drive Y:)"
+        warn "AFFINITY_SHARE=all gives Affinity read/write access to everything you can reach."
+        ;;
+    *)  die "AFFINITY_SHARE must be xdg, home, all or none." ;;
 esac
 
 for m in $EXTRA_MOUNTS; do
