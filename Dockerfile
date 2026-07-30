@@ -182,7 +182,7 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENV AFFINITY_MSIX_URL="https://downloads.affinity.studio/Affinity%20x64.msix" \
-    AFFINITY_RENDERER=vkd3d \
+    AFFINITY_RENDERER=dxvk \
     AFFINITY_APL=1 \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display \
     NVIDIA_VISIBLE_DEVICES=all

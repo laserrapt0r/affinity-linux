@@ -19,6 +19,11 @@ NAME="${AFFINITY_NAME:-affinity}"
 #   AFFINITY_MOUNTS="$HOME/Bilder:/data/Bilder" ./run-affinity.sh
 EXTRA_MOUNTS="${AFFINITY_MOUNTS:-}"
 
+# Where to keep the output of the last run. Launched from a .desktop entry there
+# is no terminal, so without this any crash diagnostics are simply lost. Set
+# AFFINITY_LOG= (empty) to disable, or to a path of your choice.
+AFFINITY_LOG="${AFFINITY_LOG-${XDG_STATE_HOME:-$HOME/.local/state}/affinity/last-run.log}"
+
 msg()  { printf '\033[1;34m[run]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[run]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[run]\033[0m %s\n' "$*" >&2; exit 1; }
@@ -205,16 +210,54 @@ fi
 
 [ "$GPU_FOUND" = 1 ] || warn "No GPU passthrough configured -- expect software rendering."
 
-# Let the user pin a specific Vulkan device, e.g.
-#   AFFINITY_GPU=nvidia ./run-affinity.sh
-case "${AFFINITY_GPU:-}" in
-    nvidia) ARGS+=(-e "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json"
-                   -e "__NV_PRIME_RENDER_OFFLOAD=1"
-                   -e "__GLX_VENDOR_LIBRARY_NAME=nvidia") ;;
-    amd)    ARGS+=(-e "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json") ;;
+# --------------------------------------------------------------------------
+# Which GPU should render?
+#
+# On a hybrid laptop this matters more than it looks. DXVK picks the "best"
+# Vulkan device, which is the discrete NVIDIA card -- but the panel hangs off the
+# integrated GPU. Presenting across GPUs cannot use a Vulkan surface, so DXVK
+# falls back to copying every frame through GDI:
+#
+#   warn: Using GDI for swapchain presentation. This will impact performance.
+#
+# which is slow and, in practice, crashes Affinity within seconds. Rendering on
+# whichever GPU actually owns the display avoids the copy entirely.
+#
+# This only constrains Vulkan. OpenCL uses a separate loader, so Affinity's
+# hardware acceleration keeps using the NVIDIA card either way.
+#
+# Override with AFFINITY_GPU=nvidia|amd|intel|all.
+# --------------------------------------------------------------------------
+detect_display_driver() {
+    local st card drv
+    for st in /sys/class/drm/card*-*/status; do
+        [ -r "$st" ] || continue
+        [ "$(cat "$st" 2>/dev/null)" = "connected" ] || continue
+        card=$(basename "$(dirname "$st")"); card=${card%%-*}
+        drv=$(basename "$(readlink -f "/sys/class/drm/$card/device/driver" 2>/dev/null)" 2>/dev/null)
+        [ -n "$drv" ] && { echo "$drv"; return; }
+    done
+}
+
+case "${AFFINITY_GPU:-auto}" in
+    nvidia) GPU_DRIVER=nvidia ;;
+    amd)    GPU_DRIVER=amdgpu ;;
+    intel)  GPU_DRIVER=i915 ;;
+    all)    GPU_DRIVER="" ;;
+    auto)   GPU_DRIVER=$(detect_display_driver) ;;
+    *)      die "AFFINITY_GPU must be nvidia, amd, intel, all or auto." ;;
 esac
 
+if [ -n "${GPU_DRIVER:-}" ]; then
+    msg "Rendering GPU: $GPU_DRIVER (drives the display)"
+    ARGS+=(-e "AFFINITY_GPU_DRIVER=$GPU_DRIVER")
+    if [ "$GPU_DRIVER" = nvidia ]; then
+        ARGS+=(-e "__NV_PRIME_RENDER_OFFLOAD=1" -e "__GLX_VENDOR_LIBRARY_NAME=nvidia")
+    fi
+fi
+
 [ -n "${AFFINITY_RENDERER:-}" ] && ARGS+=(-e "AFFINITY_RENDERER=$AFFINITY_RENDERER")
+[ -n "${AFFINITY_WPF_SW:-}" ] && ARGS+=(-e "AFFINITY_WPF_SW=$AFFINITY_WPF_SW")
 [ -n "${WINEDEBUG:-}" ] && ARGS+=(-e "WINEDEBUG=$WINEDEBUG")
 
 # --------------------------------------------------------------------------
@@ -278,7 +321,19 @@ done
 if [ ${#FILES[@]} -gt 0 ]; then
     [ ${#CMD[@]} -eq 0 ] && CMD=(affinity)
     msg "Opening: ${FILES[*]}"
-    exec "$ENGINE" "${ARGS[@]}" "$IMAGE" "${CMD[@]}" "${FILES[@]}"
+    CMD+=("${FILES[@]}")
+fi
+
+if [ -n "$AFFINITY_LOG" ]; then
+    mkdir -p "$(dirname "$AFFINITY_LOG")" 2>/dev/null || true
+    if : > "$AFFINITY_LOG" 2>/dev/null; then
+        msg "Logging to $AFFINITY_LOG"
+        # Not exec'd, so the log is complete even when the container dies: tee
+        # needs to outlive it. PIPESTATUS carries the engine's real exit code.
+        "$ENGINE" "${ARGS[@]}" "$IMAGE" "${CMD[@]}" 2>&1 | tee "$AFFINITY_LOG"
+        exit "${PIPESTATUS[0]}"
+    fi
+    warn "Cannot write $AFFINITY_LOG -- continuing without a log."
 fi
 
 exec "$ENGINE" "${ARGS[@]}" "$IMAGE" "${CMD[@]}"

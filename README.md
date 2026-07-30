@@ -49,7 +49,7 @@ was a hard failure before it was:
 | The download is an **MSIX**, and Wine has no AppX deployment service — the installer simply cannot run. | An MSIX is a ZIP. The entrypoint unpacks it and launches the contained `App/Affinity.exe` directly (the manifest declares `Windows.FullTrustApplication`, i.e. an ordinary Win32 app in an MSIX wrapper). |
 | Affinity hosts its Canva sign-in in **WebView2**, which cannot be installed under Wine. Without it the WPF message loop dies with an `SEHException` a minute or two after the UI appears. | Ships **AffinityPluginLoader + WineFix**, which patches that dialog out (and several other Wine bugs) at the .NET level. |
 | X11's **MIT-SHM** extension uses SysV shared memory, which is scoped to the IPC namespace. The app crashes the instant it paints a canvas. | The launcher runs with `--ipc=host`. |
-| Affinity renders through Direct3D. | Ships **vkd3d-proton** (D3D12) and **DXVK** (D3D9/10/11), selectable at runtime. |
+| Affinity's interface is **WPF, which renders through Direct3D 9**. Left on WineD3D/OpenGL it paints white dialogs and chrome spilling past the window edge, then hangs. | Defaults to **DXVK** for D3D9/10/11 so that path goes to Vulkan, plus **vkd3d-proton** for D3D12. |
 
 Older guides also require `WinMetadata` files copied from a real Windows install
 plus ElementalWarrior's patched `wintypes.dll`. **This is no longer needed** —
@@ -195,10 +195,12 @@ Re-run it after every driver update — the spec pins driver library paths.
 | Variable | Default | Meaning |
 |---|---|---|
 | `AFFINITY_DPI` | auto | Display scaling in DPI. `96` = 100 %, `144` = 150 %, `192` = 200 %. Auto-detected from the desktop |
-| `AFFINITY_RENDERER` | `vkd3d` | `vkd3d` (D3D12 only), `dxvk` (DXVK + vkd3d), `wined3d` (no Vulkan translation) |
+| `AFFINITY_RENDERER` | `dxvk` | `dxvk` (DXVK for D3D9/10/11 + vkd3d for D3D12), `vkd3d` (D3D12 only — leaves WPF on OpenGL), `wined3d` (no Vulkan translation) |
+| `AFFINITY_WPF_SW` | `0` | `1` forces WPF's own software rasteriser for the interface. Last resort if the UI still misrenders |
 | `AFFINITY_APL` | `1` | `0` disables AffinityPluginLoader/WineFix — expect the sign-in crash |
 | `AFFINITY_IPC` | `host` | `private` keeps the IPC namespace separate — expect the MIT-SHM crash |
-| `AFFINITY_GPU` | auto | `nvidia` or `amd` to pin one Vulkan device |
+| `AFFINITY_GPU` | `auto` | Which GPU renders: `auto` picks the one driving the display, or force `nvidia`, `amd`, `intel`, `all` |
+| `AFFINITY_LOG` | `~/.local/state/affinity/last-run.log` | Where the last run's output is kept. Empty disables it |
 | `AFFINITY_ENGINE` | auto | `podman` or `docker` |
 | `AFFINITY_VOLUME` | `affinity-data` | Name of the data volume |
 | `AFFINITY_MOUNTS` | — | Extra bind mounts, e.g. `"$HOME/Bilder:/data/Bilder"` |
@@ -245,6 +247,31 @@ data volume. Some desktops need a re-login to notice new icons.
 
 Tested on GNOME/X11. The mechanisms are desktop-agnostic, but Plasma and XFCE
 have not been verified here.
+
+### Hybrid graphics
+
+On a laptop with two GPUs, the one that renders is chosen automatically: whichever
+card owns a connected display output. That is normally the integrated GPU, since
+the built-in panel is wired to it.
+
+This is not about performance. DXVK would otherwise pick the discrete card, and
+presenting to a display owned by the *other* GPU cannot use a Vulkan surface —
+DXVK then copies every frame through GDI, which is slow and unstable. Rendering
+where the display lives avoids the copy.
+
+Only Vulkan is constrained this way. OpenCL uses its own loader, so Affinity's
+hardware acceleration keeps using the NVIDIA card regardless:
+
+```
+[affinity] Vulkan restricted to radeon_icd.json (amdgpu)
+```
+
+Force a specific card if you want to experiment:
+
+```bash
+AFFINITY_GPU=nvidia ./run-affinity.sh    # discrete, expect the GDI fallback
+AFFINITY_GPU=all ./run-affinity.sh       # let DXVK decide, as before
+```
 
 ### HiDPI displays
 
@@ -432,6 +459,38 @@ this; only relevant if you invoke `podman run` by hand.
 **Crash right after the UI appears** — check for
 `SEHException` in the output. That is the WebView2 path; make sure
 `AFFINITY_APL` is not set to `0`.
+
+**White dialogs, chrome drawn past the window edge, then a hang** — the classic
+signature of WPF's Direct3D 9 rendering going through WineD3D and OpenGL instead
+of Vulkan. On a hybrid GPU this shows up as repeated
+
+```
+libEGL warning: egl: failed to create dri2 screen
+```
+
+because Mesa cannot drive the discrete card. Confusingly the symptoms disappear
+on a machine with no GPU passthrough, where OpenGL falls back to the llvmpipe
+software rasteriser and simply works.
+
+Check which renderer the prefix is on:
+
+```bash
+./run-affinity.sh shell -c 'cat $WINEPREFIX/.renderer'
+```
+
+If it says anything other than `dxvk`, switch it — the setting is remembered in
+the prefix and re-applied on the next start:
+
+```bash
+AFFINITY_RENDERER=dxvk ./run-affinity.sh
+```
+
+Still misrendering? Take WPF off the GPU entirely. Affinity's canvas is not
+affected by this, only the interface around it:
+
+```bash
+AFFINITY_WPF_SW=1 ./run-affinity.sh
+```
 
 ---
 

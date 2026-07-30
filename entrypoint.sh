@@ -9,7 +9,7 @@ set -euo pipefail
 
 PUID="${PUID:-1000}"
 PGID="${PGID:-1000}"
-AFFINITY_RENDERER="${AFFINITY_RENDERER:-vkd3d}"
+AFFINITY_RENDERER="${AFFINITY_RENDERER:-dxvk}"
 AFFINITY_APL="${AFFINITY_APL:-1}"
 AFFINITY_MSIX_URL="${AFFINITY_MSIX_URL:-https://downloads.affinity.studio/Affinity%20x64.msix}"
 
@@ -55,6 +55,40 @@ check_display() {
      Check that /tmp/.X11-unix is mounted and that the container is
      authorised (see 'X11 access' in the README)."
     fi
+}
+
+# Restrict Vulkan to the GPU that drives the display.
+#
+# The launcher passes the DRM driver of whichever card owns a connected output.
+# Without this, DXVK picks the discrete card on a hybrid laptop, cannot create a
+# Vulkan surface for a display owned by the other GPU, and falls back to copying
+# every frame through GDI -- which crashes Affinity within seconds.
+#
+# Only Vulkan is constrained. OpenCL has its own loader in /etc/OpenCL/vendors,
+# so Affinity's hardware acceleration still reaches the NVIDIA card.
+setup_vulkan_device() {
+    local drv="${AFFINITY_GPU_DRIVER:-}"
+    [ -n "$drv" ] || return 0
+
+    local icd=""
+    case "$drv" in
+        amdgpu|radeon) icd=/usr/share/vulkan/icd.d/radeon_icd.json ;;
+        i915|xe)       icd=/usr/share/vulkan/icd.d/intel_icd.json ;;
+        nvidia*)       icd=/etc/vulkan/icd.d/nvidia_icd.json ;;
+        *)             warn "Unknown DRM driver '$drv'; leaving all Vulkan devices visible."
+                       return 0 ;;
+    esac
+
+    if [ ! -r "$icd" ]; then
+        warn "No Vulkan ICD for '$drv' at $icd -- leaving all devices visible."
+        return 0
+    fi
+
+    # VK_DRIVER_FILES is the current name; VK_ICD_FILENAMES is kept for older
+    # loaders, which ignore the former.
+    export VK_DRIVER_FILES="$icd"
+    export VK_ICD_FILENAMES="$icd"
+    log "Vulkan restricted to $(basename "$icd") ($drv)"
 }
 
 report_gpu() {
@@ -106,6 +140,13 @@ install_dlls() {
     log "Native DLLs from $(basename "$src"): ${overrides:-none}"
 }
 
+# WPF -- which is what Affinity's window chrome and dialogs are built from --
+# renders through Direct3D 9, not 11 or 12. That makes DXVK the interesting part
+# of the renderer choice: without it, D3D9 falls back to WineD3D over OpenGL, and
+# on a hybrid GPU where Mesa cannot drive the discrete card ("libEGL: failed to
+# create dri2 screen") the result is white dialogs, chrome painted past the window
+# edges, and eventually a hang. Software OpenGL happens to work, which is why the
+# symptoms can vanish on a machine with no GPU passthrough at all.
 setup_renderer() {
     local marker="$PREFIX/.renderer"
     [ -f "$marker" ] && [ "$(cat "$marker")" = "$AFFINITY_RENDERER" ] && return 0
@@ -117,7 +158,8 @@ setup_renderer() {
             install_dlls /opt/vkd3d
             ;;
         vkd3d)
-            log "Renderer: vkd3d-proton (D3D12), WineD3D for D3D11"
+            log "Renderer: vkd3d-proton (D3D12) only -- D3D9/11 stay on WineD3D/OpenGL"
+            warn "WPF renders via D3D9; without DXVK expect white dialogs and glitches."
             install_dlls /opt/vkd3d
             ;;
         wined3d)
@@ -160,6 +202,28 @@ setup_dpi() {
     wine reg add 'HKCU\Software\Wine\Fonts'   /v LogPixels /t REG_DWORD /d "$dpi" /f >/dev/null 2>&1 || true
     printf '%s' "$dpi" > "$marker"
     log "Display scaling: ${dpi} DPI ($(( dpi * 100 / 96 ))%)"
+}
+
+# Escape hatch for broken GPU rendering of the WPF interface.
+#
+# WPF checks HKCU\SOFTWARE\Microsoft\Avalon.Graphics\DisableHWAcceleration and
+# falls back to its own software rasteriser. Slower and heavier on the CPU, but
+# it renders correctly no matter what the driver stack is doing. Affinity's own
+# canvas is unaffected -- that does not go through WPF.
+setup_wpf() {
+    local want="${AFFINITY_WPF_SW:-0}"
+    local marker="$PREFIX/.wpfsw"
+    [ -f "$marker" ] && [ "$(cat "$marker")" = "$want" ] && return 0
+
+    if [ "$want" = "1" ]; then
+        wine reg add 'HKCU\SOFTWARE\Microsoft\Avalon.Graphics' /v DisableHWAcceleration \
+            /t REG_DWORD /d 1 /f >/dev/null 2>&1 || true
+        log "WPF hardware acceleration disabled (software rendering for the UI)."
+    else
+        wine reg add 'HKCU\SOFTWARE\Microsoft\Avalon.Graphics' /v DisableHWAcceleration \
+            /t REG_DWORD /d 0 /f >/dev/null 2>&1 || true
+    fi
+    printf '%s' "$want" > "$marker"
 }
 
 download_msix() {
@@ -231,9 +295,11 @@ install_apl() {
 # ---------------------------------------------------------------------------
 launch_affinity() {
     check_display
+    setup_vulkan_device
     report_gpu
     init_prefix
     setup_renderer
+    setup_wpf
     setup_dpi
     install_affinity
     install_apl
