@@ -82,21 +82,17 @@ fi
 if [ "$CDI_MAJOR_OK" = "0" ]; then
     msg "Podman < 5 detected -- downgrading the spec to CDI 0.6.0."
     sed -i 's/^cdiVersion: 0\.7\.[0-9]*/cdiVersion: 0.6.0/' /etc/cdi/nvidia.yaml
-    python3 - <<'PY'
-import re
-path = '/etc/cdi/nvidia.yaml'
-out, skip = [], False
-for line in open(path).read().split('\n'):
-    if re.match(r'^\s*additionalGids:\s*$', line):
-        skip = True
-        continue
-    if skip:
-        if re.match(r'^\s*-\s*\d+\s*$', line):
-            continue
-        skip = False
-    out.append(line)
-open(path, 'w').write('\n'.join(out))
-PY
+
+    # Drop the 'additionalGids:' keys together with their list items. Done in
+    # awk rather than python so this script needs nothing beyond a POSIX
+    # userland -- a minimal Arch or container host may have no python at all.
+    awk '
+        /^[[:space:]]*additionalGids:[[:space:]]*$/ { skip = 1; next }
+        skip && /^[[:space:]]*-[[:space:]]*[0-9]+[[:space:]]*$/ { next }
+        { skip = 0; print }
+    ' /etc/cdi/nvidia.yaml > /etc/cdi/nvidia.yaml.tmp \
+        && mv /etc/cdi/nvidia.yaml.tmp /etc/cdi/nvidia.yaml \
+        || { rm -f /etc/cdi/nvidia.yaml.tmp; die "Failed to post-process the CDI spec."; }
 fi
 
 # nvidia-container-toolkit also drops a copy in /var/run/cdi. If that one is

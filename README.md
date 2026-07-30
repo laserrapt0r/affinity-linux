@@ -68,11 +68,100 @@ everything afterwards depends on. Every Wine step additionally runs under a
 
 ## Requirements
 
-* Podman (rootless) or Docker
-* An X11 session (on Wayland this runs against XWayland)
-* For NVIDIA: `nvidia-container-toolkit`, then `sudo ./setup-host.sh`
-* For AMD/Intel: nothing — the launcher passes `/dev/dri` through and Mesa is
-  already in the image.
+Everything Affinity needs — Wine, .NET, Mesa, DXVK — is inside the image. The
+host only has to provide a container engine, an X server and a few small
+utilities.
+
+**Strictly required: a container engine and an X server.** Everything else is
+used opportunistically; the scripts check for each tool and degrade instead of
+failing. In practice you still want `xauth`, or the container will not be allowed
+to talk to your X server, and the desktop helpers, or menu entries and file
+associations will not refresh until your next login.
+
+### Host packages
+
+**Debian / Ubuntu**
+
+```bash
+sudo apt install podman uidmap slirp4netns fuse-overlayfs \
+    xauth x11-xserver-utils \
+    xdg-utils desktop-file-utils shared-mime-info gtk-update-icon-cache unzip
+```
+
+**Arch**
+
+```bash
+sudo pacman -S podman \
+    xorg-xauth xorg-xrdb \
+    xdg-utils desktop-file-utils shared-mime-info gtk-update-icon-cache unzip
+```
+
+**Fedora**
+
+```bash
+sudo dnf install podman \
+    xorg-x11-xauth xrdb \
+    xdg-utils desktop-file-utils shared-mime-info gtk-update-icon-cache unzip
+```
+
+What each one is for:
+
+| Provides | Needed by | Without it |
+|---|---|---|
+| `podman` (or `docker`) | everything | nothing works |
+| `uidmap`, `slirp4netns`, `fuse-overlayfs` | rootless Podman on Debian/Ubuntu | rootless containers fail; Arch and Fedora pull these in themselves |
+| `xauth` | `run-affinity.sh` | no X cookie is built, and the X server refuses the container |
+| `xrdb` | HiDPI detection | falls back to GNOME settings, then to 96 DPI |
+| `xdg-utils`, `desktop-file-utils`, `shared-mime-info`, `gtk-update-icon-cache` | `install-desktop.sh` | menu entry and associations are written but caches are not refreshed until re-login |
+| `unzip` | `install-desktop.sh` fallback | icons are read from the data volume instead, which works once Affinity has been started |
+
+Deliberately *not* on this list: Python, Wine, winetricks and any .NET runtime.
+Wine and its dependencies live in the image, and the host scripts are plain
+POSIX shell plus `awk`.
+
+Using Docker instead of Podman? Substitute `docker` for `podman` above. Note
+that adding yourself to the `docker` group grants effective root on the host —
+see [Isolation, and what it costs](#isolation-and-what-it-costs).
+
+### NVIDIA GPUs
+
+`nvidia-container-toolkit` is what lets a container see the GPU. On Arch it is in
+`extra`; on Debian, Ubuntu and Fedora it comes from NVIDIA's own repository, not
+from the distribution.
+
+**Arch**
+
+```bash
+sudo pacman -S nvidia-container-toolkit
+```
+
+**Debian / Ubuntu**
+
+```bash
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+  | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt update && sudo apt install nvidia-container-toolkit
+```
+
+**Fedora**
+
+```bash
+curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+  | sudo tee /etc/yum.repos.d/nvidia-container-toolkit.repo
+sudo dnf install nvidia-container-toolkit
+```
+
+Then, on every distribution:
+
+```bash
+sudo ./setup-host.sh
+```
+
+**AMD / Intel GPUs need none of this.** The launcher passes `/dev/dri` through and
+Mesa is already in the image.
 
 ### Why `setup-host.sh` exists
 
@@ -221,10 +310,11 @@ work. Only four things are asked of the host:
 
 Notes for specific distributions:
 
-* **Arch** ships **Podman 5+**, which understands CDI 0.7 natively. `setup-host.sh`
-  detects this and skips the spec downgrade that Ubuntu's Podman 4.9 needs.
-  Install with `sudo pacman -S podman nvidia-container-toolkit`.
-* **Fedora / openSUSE** likewise ship Podman 5+; no downgrade applied.
+* **Arch and Fedora** currently ship **Podman 6.x**, which understands CDI 0.7
+  natively — `setup-host.sh` detects this and skips the spec downgrade that
+  Ubuntu's Podman 4.9 needs. Arch also has `nvidia-container-toolkit` in `extra`,
+  so no extra repository is required there.
+* Package names per distribution are in [Host packages](#host-packages).
 * **NVIDIA driver version does not need to match** anything in the image — the
   container runtime injects the host's own driver libraries. Just re-run
   `setup-host.sh` after a driver update, since the CDI spec pins library paths.
