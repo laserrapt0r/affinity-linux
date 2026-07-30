@@ -1,0 +1,35 @@
+# --- Never commit -------------------------------------------------------
+# The Affinity installer is proprietary and ~640 MiB. It is downloaded at
+# runtime, not distributed with this repository.
+cache/
+*.msix
+*.msixbundle
+
+# Wine prefix / application data, should you bind-mount instead of using a
+# named volume.
+data/
+prefix/
+
+# --- Local noise --------------------------------------------------------
+*.log
+*.orig
+*.rej
+*.bak
+*~
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.code-workspace
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+.directory
+
+# Nextcloud / cloud sync artefacts (this tree may live inside a synced folder)
+.nextcloudsync.log
+*conflicted copy*
+*_conflict-*
+.owncloudsync.log
